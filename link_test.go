@@ -5,6 +5,7 @@ package netlink
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -393,14 +394,9 @@ func compareGretap(t *testing.T, expected, actual *Gretap) {
 		t.Fatal("Gretap.Link doesn't match")
 	}
 
-	/*
-		 * NOTE: setting the FlowBased flag doesn't seem to work, but by lack of
-		 * a proper way to debug this, this test is disabled for now
-
-		 if actual.FlowBased != expected.FlowBased {
-			t.Fatal("Gretap.FlowBased doesn't match")
-		 }
-	*/
+	if actual.FlowBased != expected.FlowBased {
+		t.Fatal("Gretap.FlowBased doesn't match")
+	 }
 }
 
 func compareGretun(t *testing.T, expected, actual *Gretun) {
@@ -458,6 +454,9 @@ func compareGretun(t *testing.T, expected, actual *Gretun) {
 
 	if actual.EncapDport != expected.EncapDport {
 		t.Fatal("Gretun.EncapDport doesn't match")
+	}
+	if actual.FlowBased != expected.FlowBased {
+		t.Fatal("Gretun.FlowBased doesn't match")
 	}
 }
 
@@ -746,10 +745,18 @@ func TestLinkAddDelGretunPointToMultiPoint(t *testing.T) {
 		OKey:      7890})
 }
 
+func TestLinkAddDelGretunFlowBased(t *testing.T) {
+	minKernelRequired(t, 4, 3)
+
+	tearDown := setUpNetlinkTest(t)
+	defer tearDown()
+
+	testLinkAddDel(t, &Gretun{
+		LinkAttrs: LinkAttrs{Name: "foo"},
+		FlowBased: true})
+}
+
 func TestLinkAddDelGretapFlowBased(t *testing.T) {
-	if os.Getenv("CI") == "true" {
-		t.Skipf("Fails in CI with: link_test.go:34: numerical result out of range")
-	}
 	minKernelRequired(t, 4, 3)
 
 	tearDown := setUpNetlinkTest(t)
@@ -981,6 +988,32 @@ func TestLinkAddDelDummyWithGSO(t *testing.T) {
 	}
 	if dummy.GSOMaxSegs != gsoMaxSegs {
 		t.Fatalf("GSOMaxSeg is %d, should be %d", dummy.GSOMaxSegs, gsoMaxSegs)
+	}
+}
+
+func TestLinkAddDelDummyWithGRO(t *testing.T) {
+	const (
+		groMaxSize = 1 << 14
+	)
+	minKernelRequired(t, 5, 19)
+	tearDown := setUpNetlinkTest(t)
+	defer tearDown()
+
+	dummy := &Dummy{LinkAttrs: LinkAttrs{Name: "foo", GROMaxSize: groMaxSize}}
+	if err := LinkAdd(dummy); err != nil {
+		t.Fatal(err)
+	}
+	link, err := LinkByName("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dummy, ok := link.(*Dummy)
+	if !ok {
+		t.Fatalf("unexpected link type: %T", link)
+	}
+
+	if dummy.GROMaxSize != groMaxSize {
+		t.Fatalf("GROMaxSize is %d, should be %d", dummy.GROMaxSize, groMaxSize)
 	}
 }
 
@@ -2055,6 +2088,66 @@ func TestLinkAddDelVti(t *testing.T) {
 		Remote:    net.IPv6loopback})
 }
 
+func TestLinkSetGSOMaxSize(t *testing.T) {
+	minKernelRequired(t, 5, 19)
+	tearDown := setUpNetlinkTest(t)
+	defer tearDown()
+
+	iface := &Veth{LinkAttrs: LinkAttrs{Name: "foo", TxQLen: testTxQLen, MTU: 1500}, PeerName: "bar"}
+	if err := LinkAdd(iface); err != nil {
+		t.Fatal(err)
+	}
+
+	link, err := LinkByName("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = LinkSetGSOMaxSize(link, 32768)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	link, err = LinkByName("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if link.Attrs().GSOMaxSize != 32768 {
+		t.Fatalf("GSO max size was not modified")
+	}
+}
+
+func TestLinkSetGROMaxSize(t *testing.T) {
+	minKernelRequired(t, 5, 19)
+	tearDown := setUpNetlinkTest(t)
+	defer tearDown()
+
+	iface := &Veth{LinkAttrs: LinkAttrs{Name: "foo", TxQLen: testTxQLen, MTU: 1500}, PeerName: "bar"}
+	if err := LinkAdd(iface); err != nil {
+		t.Fatal(err)
+	}
+
+	link, err := LinkByName("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = LinkSetGROMaxSize(link, 32768)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	link, err = LinkByName("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if link.Attrs().GROMaxSize != 32768 {
+		t.Fatalf("GRO max size was not modified")
+	}
+}
+
 func TestBridgeCreationWithMulticastSnooping(t *testing.T) {
 	minKernelRequired(t, 4, 4)
 
@@ -2412,8 +2505,12 @@ func TestLinkAddDelXfrmiNoId(t *testing.T) {
 
 	lo, _ := LinkByName("lo")
 
-	testLinkAddDel(t, &Xfrmi{
+	err := LinkAdd(&Xfrmi{
 		LinkAttrs: LinkAttrs{Name: "xfrm0", ParentIndex: lo.Attrs().Index}})
+	if !errors.Is(err, unix.EINVAL) {
+		t.Errorf("Error returned expected to be EINVAL")
+	}
+
 }
 
 func TestLinkByNameWhenLinkIsNotFound(t *testing.T) {
