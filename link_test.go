@@ -223,18 +223,25 @@ func testLinkAddDel(t *testing.T, link Link) {
 		}
 	}
 
-	if _, ok := link.(*Iptun); ok {
-		_, ok := result.(*Iptun)
+	if iptun, ok := link.(*Iptun); ok {
+		other, ok := result.(*Iptun)
 		if !ok {
 			t.Fatal("Result of create is not a iptun")
 		}
+		if iptun.FlowBased != other.FlowBased {
+			t.Fatal("Iptun.FlowBased doesn't match")
+		}
 	}
 
-	if _, ok := link.(*Ip6tnl); ok {
-		_, ok := result.(*Ip6tnl)
+	if ip6tnl, ok := link.(*Ip6tnl); ok {
+		other, ok := result.(*Ip6tnl)
 		if !ok {
 			t.Fatal("Result of create is not a ip6tnl")
 		}
+		if ip6tnl.FlowBased != other.FlowBased {
+			t.Fatal("Ip6tnl.FlowBased doesn't match")
+		}
+
 	}
 
 	if _, ok := link.(*Sittun); ok {
@@ -334,6 +341,10 @@ func compareGeneve(t *testing.T, expected, actual *Geneve) {
 		t.Fatalf("Geneve.Remote is not equal: %s!=%s", actual.Remote, expected.Remote)
 	}
 
+	if actual.FlowBased != expected.FlowBased {
+		t.Fatal("Geneve.FlowBased doesn't match")
+	}
+
 	// TODO: we should implement the rest of the geneve methods
 }
 
@@ -396,7 +407,7 @@ func compareGretap(t *testing.T, expected, actual *Gretap) {
 
 	if actual.FlowBased != expected.FlowBased {
 		t.Fatal("Gretap.FlowBased doesn't match")
-	 }
+	}
 }
 
 func compareGretun(t *testing.T, expected, actual *Gretun) {
@@ -652,6 +663,16 @@ func TestLinkAddDelGeneve(t *testing.T) {
 		LinkAttrs: LinkAttrs{Name: "foo6", EncapType: "geneve"},
 		ID:        0x1000,
 		Remote:    net.ParseIP("2001:db8:ef33::2")})
+}
+
+func TestLinkAddDelGeneveFlowBased(t *testing.T) {
+	tearDown := setUpNetlinkTest(t)
+	defer tearDown()
+
+	testLinkAddDel(t, &Geneve{
+		LinkAttrs: LinkAttrs{Name: "foo"},
+		Dport:     1234,
+		FlowBased: true})
 }
 
 func TestGeneveCompareToIP(t *testing.T) {
@@ -2047,6 +2068,17 @@ func TestLinkAddDelIptun(t *testing.T) {
 		Remote:    net.IPv4(127, 0, 0, 1)})
 }
 
+func TestLinkAddDelIptunFlowBased(t *testing.T) {
+	minKernelRequired(t, 4, 9)
+	tearDown := setUpNetlinkTest(t)
+	defer tearDown()
+
+	testLinkAddDel(t, &Iptun{
+		LinkAttrs: LinkAttrs{Name: "iptunflowfoo"},
+		FlowBased: true,
+	})
+}
+
 func TestLinkAddDelIp6tnl(t *testing.T) {
 	tearDown := setUpNetlinkTest(t)
 	defer tearDown()
@@ -2055,6 +2087,16 @@ func TestLinkAddDelIp6tnl(t *testing.T) {
 		LinkAttrs: LinkAttrs{Name: "ip6tnltest"},
 		Local:     net.ParseIP("2001:db8::100"),
 		Remote:    net.ParseIP("2001:db8::200"),
+	})
+}
+
+func TestLinkAddDelIp6tnlFlowbased(t *testing.T) {
+	tearDown := setUpNetlinkTest(t)
+	defer tearDown()
+
+	testLinkAddDel(t, &Ip6tnl{
+		LinkAttrs: LinkAttrs{Name: "ip6tnltest"},
+		FlowBased: true,
 	})
 }
 
@@ -2118,6 +2160,36 @@ func TestLinkSetGSOMaxSize(t *testing.T) {
 	}
 }
 
+func TestLinkSetGSOMaxSegs(t *testing.T) {
+       minKernelRequired(t, 5, 19)
+       tearDown := setUpNetlinkTest(t)
+       defer tearDown()
+
+       iface := &Veth{LinkAttrs: LinkAttrs{Name: "foo", TxQLen: testTxQLen, MTU: 1500}, PeerName: "bar"}
+       if err := LinkAdd(iface); err != nil {
+               t.Fatal(err)
+       }
+
+       link, err := LinkByName("foo")
+       if err != nil {
+               t.Fatal(err)
+       }
+
+       err = LinkSetGSOMaxSegs(link, 16)
+       if err != nil {
+               t.Fatal(err)
+       }
+
+       link, err = LinkByName("foo")
+       if err != nil {
+               t.Fatal(err)
+       }
+
+       if link.Attrs().GSOMaxSegs != 16 {
+               t.Fatalf("GSO max segments was not modified")
+       }
+}
+
 func TestLinkSetGROMaxSize(t *testing.T) {
 	minKernelRequired(t, 5, 19)
 	tearDown := setUpNetlinkTest(t)
@@ -2144,6 +2216,86 @@ func TestLinkSetGROMaxSize(t *testing.T) {
 	}
 
 	if link.Attrs().GROMaxSize != 32768 {
+		t.Fatalf("GRO max size was not modified")
+	}
+}
+
+func TestLinkGetTSOMax(t *testing.T) {
+	minKernelRequired(t, 5, 19)
+	tearDown := setUpNetlinkTest(t)
+	defer tearDown()
+
+	iface := &Veth{LinkAttrs: LinkAttrs{Name: "foo", TxQLen: testTxQLen, MTU: 1500}, PeerName: "bar"}
+	if err := LinkAdd(iface); err != nil {
+		t.Fatal(err)
+	}
+
+	link, err := LinkByName("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if link.Attrs().TSOMaxSize != 524280 || link.Attrs().TSOMaxSegs != 65535 {
+		t.Fatalf("TSO max size and segments could not be retrieved")
+	}
+}
+
+func TestLinkSetGSOIPv4MaxSize(t *testing.T) {
+	minKernelRequired(t, 6, 3)
+	tearDown := setUpNetlinkTest(t)
+	defer tearDown()
+
+	iface := &Veth{LinkAttrs: LinkAttrs{Name: "foo", TxQLen: testTxQLen, MTU: 1500}, PeerName: "bar"}
+	if err := LinkAdd(iface); err != nil {
+		t.Fatal(err)
+	}
+
+	link, err := LinkByName("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = LinkSetGSOIPv4MaxSize(link, 32768)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	link, err = LinkByName("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if link.Attrs().GSOIPv4MaxSize != 32768 {
+		t.Fatalf("GSO max size was not modified")
+	}
+}
+
+func TestLinkSetGROIPv4MaxSize(t *testing.T) {
+	minKernelRequired(t, 6, 3)
+	tearDown := setUpNetlinkTest(t)
+	defer tearDown()
+
+	iface := &Veth{LinkAttrs: LinkAttrs{Name: "foo", TxQLen: testTxQLen, MTU: 1500}, PeerName: "bar"}
+	if err := LinkAdd(iface); err != nil {
+		t.Fatal(err)
+	}
+
+	link, err := LinkByName("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = LinkSetGROIPv4MaxSize(link, 32768)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	link, err = LinkByName("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if link.Attrs().GROIPv4MaxSize != 32768 {
 		t.Fatalf("GRO max size was not modified")
 	}
 }
@@ -2254,6 +2406,34 @@ func TestBridgeSetVlanFiltering(t *testing.T) {
 	}
 }
 
+func TestBridgeDefaultPVID(t *testing.T) {
+	minKernelRequired(t, 4, 4)
+
+	tearDown := setUpNetlinkTest(t)
+	defer tearDown()
+
+	bridgeName := "foo"
+	bridge := &Bridge{LinkAttrs: LinkAttrs{Name: bridgeName}}
+	if err := LinkAdd(bridge); err != nil {
+		t.Fatal(err)
+	}
+	expectVlanDefaultPVID(t, bridgeName, 1)
+
+	if err := BridgeSetVlanDefaultPVID(bridge, 100); err != nil {
+		t.Fatal(err)
+	}
+	expectVlanDefaultPVID(t, bridgeName, 100)
+
+	if err := BridgeSetVlanDefaultPVID(bridge, 0); err != nil {
+		t.Fatal(err)
+	}
+	expectVlanDefaultPVID(t, bridgeName, 0)
+
+	if err := LinkDel(bridge); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func expectVlanFiltering(t *testing.T, linkName string, expected bool) {
 	bridge, err := LinkByName(linkName)
 	if err != nil {
@@ -2262,6 +2442,17 @@ func expectVlanFiltering(t *testing.T, linkName string, expected bool) {
 
 	if actual := *bridge.(*Bridge).VlanFiltering; actual != expected {
 		t.Fatalf("expected %t got %t", expected, actual)
+	}
+}
+
+func expectVlanDefaultPVID(t *testing.T, linkName string, expected uint16) {
+	bridge, err := LinkByName(linkName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if actual := *bridge.(*Bridge).VlanDefaultPVID; actual != expected {
+		t.Fatalf("expected %d got %d", expected, actual)
 	}
 }
 

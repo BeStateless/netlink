@@ -49,6 +49,14 @@ func TestRouteAddDel(t *testing.T) {
 		t.Fatal("Route not added properly")
 	}
 
+	routes, err = RouteList(nil, FAMILY_V4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 {
+		t.Fatal("Route not listed properly")
+	}
+
 	dstIP := net.IPv4(192, 168, 0, 42)
 	routeToDstIP, err := RouteGet(dstIP)
 	if err != nil {
@@ -69,6 +77,80 @@ func TestRouteAddDel(t *testing.T) {
 		t.Fatal("Route not removed properly")
 	}
 
+	// add default route test
+	// equiv: default dev lo
+	_, defaultDst, _ := net.ParseCIDR("0.0.0.0/0")
+	route = Route{Dst: defaultDst, LinkIndex: link.Attrs().Index}
+	if err := RouteAdd(&route); err != nil {
+		t.Fatal(err)
+	}
+	routes, err = RouteList(link, FAMILY_V4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 {
+		t.Fatal("Dev default route not listed properly")
+	}
+	if err := RouteDel(&routes[0]); err != nil {
+		t.Fatal(err)
+	}
+	routes, err = RouteList(link, FAMILY_V4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 0 {
+		t.Fatal("Dev default route not removed properly")
+	}
+
+	// equiv: blackhole default
+	route = Route{Dst: defaultDst, Type: unix.RTN_BLACKHOLE, Family: FAMILY_V4}
+	if err := RouteAdd(&route); err != nil {
+		t.Fatal(err)
+	}
+	routes, err = RouteList(nil, FAMILY_V4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%+v", routes)
+
+	if len(routes) != 1 {
+		t.Fatal("Blackhole default route not listed properly")
+	}
+
+	if err := RouteDel(&routes[0]); err != nil {
+		t.Fatal(err)
+	}
+	routes, err = RouteList(nil, FAMILY_V4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 0 {
+		t.Fatal("Blackhole default route not removed properly")
+	}
+
+	// equiv: prohibit default
+	route = Route{Dst: defaultDst, Type: unix.RTN_PROHIBIT}
+	if err := RouteAdd(&route); err != nil {
+		t.Fatal(err)
+	}
+	routes, err = RouteList(nil, FAMILY_V4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 {
+		t.Fatal("Prohibit default route not listed properly")
+	}
+
+	if err := RouteDel(&routes[0]); err != nil {
+		t.Fatal(err)
+	}
+	routes, err = RouteList(nil, FAMILY_V4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 0 {
+		t.Fatal("Prohibit default route not removed properly")
+	}
 }
 
 func TestRoute6AddDel(t *testing.T) {
@@ -127,7 +209,7 @@ func TestRoute6AddDel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// cleanup route and dummy interface created for the test
+	// cleanup route
 	if len(routeToDstIP) == 0 {
 		t.Fatal("Route not present")
 	}
@@ -141,6 +223,108 @@ func TestRoute6AddDel(t *testing.T) {
 	if len(routes) != nroutes {
 		t.Fatal("Route not removed properly")
 	}
+
+	// add a default link route
+	_, defaultDst, _ := net.ParseCIDR("::/0")
+	route = Route{LinkIndex: link.Attrs().Index, Dst: defaultDst}
+	if err := RouteAdd(&route); err != nil {
+		t.Fatal(err)
+	}
+	routes, err = RouteList(link, FAMILY_V6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != nroutes+1 {
+		t.Fatal("Default route not added properly")
+	}
+
+	// add a default link route
+	for _, route := range routes {
+		if route.Dst.String() == defaultDst.String() {
+			if err := RouteDel(&route); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	routes, err = RouteList(link, FAMILY_V6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != nroutes {
+		t.Fatal("Default route not removed properly")
+	}
+
+	// add blackhole default link route
+	routes, err = RouteList(nil, FAMILY_V6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nroutes = len(routes)
+
+	route = Route{Type: unix.RTN_BLACKHOLE, Dst: defaultDst}
+	if err := RouteAdd(&route); err != nil {
+		t.Fatal(err)
+	}
+	routes, err = RouteList(nil, FAMILY_V6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != nroutes+1 {
+		t.Fatal("Blackhole default route not added properly")
+	}
+
+	// add blackhole default link route
+	for _, route := range routes {
+		if ipNetEqual(route.Dst, defaultDst) {
+			if err := RouteDel(&route); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	routes, err = RouteList(nil, FAMILY_V6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != nroutes {
+		t.Fatal("Blackhole default route not removed properly")
+	}
+
+	// add prohibit default link route
+	routes, err = RouteList(nil, FAMILY_V6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nroutes = len(routes)
+
+	route = Route{Type: unix.RTN_BLACKHOLE, Dst: defaultDst}
+	if err := RouteAdd(&route); err != nil {
+		t.Fatal(err)
+	}
+	routes, err = RouteList(nil, FAMILY_V6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != nroutes+1 {
+		t.Fatal("Prohibit default route not added properly")
+	}
+
+	// add prohibit default link route
+	for _, route := range routes {
+		if ipNetEqual(route.Dst, defaultDst) {
+			if err := RouteDel(&route); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	routes, err = RouteList(nil, FAMILY_V6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != nroutes {
+		t.Fatal("Prohibit default route not removed properly")
+	}
+
+	// cleanup dummy interface created for the test
 	if err := LinkDel(link); err != nil {
 		t.Fatal(err)
 	}
@@ -1738,5 +1922,159 @@ func TestRouteUIDOption(t *testing.T) {
 	// option uid is within uidrange; rule applies; lookup test table
 	if len(routes) != 1 || !routes[0].Gw.Equal(gw2) {
 		t.Fatal(routes)
+	}
+}
+
+func TestRouteFWMarkOption(t *testing.T) {
+	tearDown := setUpNetlinkTest(t)
+	defer tearDown()
+
+	// setup eth0 so that network is reachable
+	err := LinkAdd(&Dummy{LinkAttrs{Name: "eth0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	link, err := LinkByName("eth0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = LinkSetUp(link); err != nil {
+		t.Fatal(err)
+	}
+	addr := &Addr{
+		IPNet: &net.IPNet{
+			IP:   net.IPv4(192, 168, 1, 1),
+			Mask: net.CIDRMask(16, 32),
+		},
+	}
+	if err = AddrAdd(link, addr); err != nil {
+		t.Fatal(err)
+	}
+
+	// a table different than unix.RT_TABLE_MAIN
+	testtable := 1000
+
+	gw1 := net.IPv4(192, 168, 1, 254)
+	gw2 := net.IPv4(192, 168, 2, 254)
+
+	// add default route via gw1 (in main route table by default)
+	defaultRouteMain := Route{
+		Dst: nil,
+		Gw:  gw1,
+	}
+	if err := RouteAdd(&defaultRouteMain); err != nil {
+		t.Fatal(err)
+	}
+
+	// add default route via gw2 in test route table
+	defaultRouteTest := Route{
+		Dst:   nil,
+		Gw:    gw2,
+		Table: testtable,
+	}
+	if err := RouteAdd(&defaultRouteTest); err != nil {
+		t.Fatal(err)
+	}
+
+	// check the routes are in different tables
+	routes, err := RouteListFiltered(FAMILY_V4, &Route{
+		Dst:   nil,
+		Table: unix.RT_TABLE_UNSPEC,
+	}, RT_FILTER_DST|RT_FILTER_TABLE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 2 || routes[0].Table == routes[1].Table {
+		t.Fatal("Routes not added properly")
+	}
+
+	// add a rule that fwmark match should result in route lookup of test table
+	fwmark := 1000
+
+	rule := NewRule()
+	rule.Mark = fwmark
+	rule.Mask = 0xFFFFFFFF
+	rule.Table = testtable
+	if err := RuleAdd(rule); err != nil {
+		t.Fatal(err)
+	}
+
+	dstIP := net.IPv4(10, 1, 1, 1)
+
+	// check getting route without FWMark option
+	routes, err = RouteGetWithOptions(dstIP, &RouteGetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || !routes[0].Gw.Equal(gw1) {
+		t.Fatal(routes)
+	}
+
+	// check getting route with FWMark option
+	routes, err = RouteGetWithOptions(dstIP, &RouteGetOptions{Mark: fwmark})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || !routes[0].Gw.Equal(gw2) {
+		t.Fatal(routes)
+	}
+}
+
+func TestRouteGetFIBMatchOption(t *testing.T) {
+	tearDown := setUpNetlinkTest(t)
+	defer tearDown()
+
+	err := LinkAdd(&Dummy{LinkAttrs{Name: "eth0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	link, err := LinkByName("eth0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = LinkSetUp(link); err != nil {
+		t.Fatal(err)
+	}
+	addr := &Addr{
+		IPNet: &net.IPNet{
+			IP:   net.IPv4(192, 168, 0, 2),
+			Mask: net.CIDRMask(24, 32),
+		},
+	}
+	if err = AddrAdd(link, addr); err != nil {
+		t.Fatal(err)
+	}
+
+	route := &Route{
+		LinkIndex: link.Attrs().Index,
+		Gw:        net.IPv4(192, 168, 1, 1),
+		Dst: &net.IPNet{
+			IP:   net.IPv4(192, 168, 2, 0),
+			Mask: net.CIDRMask(24, 32),
+		},
+		Flags: int(FLAG_ONLINK),
+	}
+
+	err = RouteAdd(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	routes, err := RouteGetWithOptions(net.IPv4(192, 168, 2, 1), &RouteGetOptions{FIBMatch: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(routes) != 1 {
+		t.Fatalf("More than one route matched %v", routes)
+	}
+
+	if len(routes[0].ListFlags()) != 1 {
+		t.Fatalf("More than one route flag returned %v", routes[0].ListFlags())
+	}
+
+	flag := routes[0].ListFlags()[0]
+	if flag != "onlink" {
+		t.Fatalf("Unexpected flag %s returned", flag)
 	}
 }

@@ -23,6 +23,7 @@ func TestRuleAddDel(t *testing.T) {
 	}
 
 	rule := NewRule()
+	rule.Family = FAMILY_V4
 	rule.Table = unix.RT_TABLE_MAIN
 	rule.Src = srcNet
 	rule.Dst = dstNet
@@ -35,6 +36,7 @@ func TestRuleAddDel(t *testing.T) {
 	rule.Sport = NewRulePortRange(1000, 1024)
 	rule.IPProto = unix.IPPROTO_UDP
 	rule.UIDRange = NewRuleUIDRange(100, 100)
+	rule.Protocol = unix.RTPROT_KERNEL
 	if err := RuleAdd(rule); err != nil {
 		t.Fatal(err)
 	}
@@ -120,6 +122,7 @@ func runRuleListFiltered(t *testing.T, family int, srcNet, dstNet *net.IPNet) {
 				r := NewRule()
 				r.Src = srcNet
 				r.Priority = 1 // Must add priority and table otherwise it's auto-assigned
+				r.Family = family
 				r.Table = 1
 				RuleAdd(r)
 				return r
@@ -137,6 +140,7 @@ func runRuleListFiltered(t *testing.T, family int, srcNet, dstNet *net.IPNet) {
 				r := NewRule()
 				r.Dst = dstNet
 				r.Priority = 1 // Must add priority and table otherwise it's auto-assigned
+				r.Family = family
 				r.Table = 1
 				RuleAdd(r)
 				return r
@@ -154,6 +158,7 @@ func runRuleListFiltered(t *testing.T, family int, srcNet, dstNet *net.IPNet) {
 				r := NewRule()
 				r.Dst = dstNet
 				r.Priority = 1 // Must add priority and table otherwise it's auto-assigned
+				r.Family = family
 				r.Table = 1
 				RuleAdd(r)
 
@@ -189,6 +194,7 @@ func runRuleListFiltered(t *testing.T, family int, srcNet, dstNet *net.IPNet) {
 				r := NewRule()
 				r.Dst = dstNet
 				r.Priority = 1 // Must add priority and table otherwise it's auto-assigned
+				r.Family = family
 				r.Table = 1
 				RuleAdd(r)
 
@@ -224,6 +230,7 @@ func runRuleListFiltered(t *testing.T, family int, srcNet, dstNet *net.IPNet) {
 				r := NewRule()
 				r.Src = srcNet
 				r.Priority = 5
+				r.Family = family
 				r.Table = 1
 				RuleAdd(r)
 
@@ -265,6 +272,7 @@ func runRuleListFiltered(t *testing.T, family int, srcNet, dstNet *net.IPNet) {
 				r := NewRule()
 				r.Src = srcNet
 				r.Priority = 1 // Must add priority otherwise it's auto-assigned
+				r.Family = family
 				r.Table = 199
 				RuleAdd(r)
 				return r
@@ -282,6 +290,7 @@ func runRuleListFiltered(t *testing.T, family int, srcNet, dstNet *net.IPNet) {
 				r := NewRule()
 				r.Src = srcNet
 				r.Priority = 1 // Must add priority and table otherwise it's auto-assigned
+				r.Family = family
 				r.Table = 1
 				r.Mask = 0x5
 				RuleAdd(r)
@@ -300,6 +309,7 @@ func runRuleListFiltered(t *testing.T, family int, srcNet, dstNet *net.IPNet) {
 				r := NewRule()
 				r.Src = srcNet
 				r.Priority = 1 // Must add priority, table, mask otherwise it's auto-assigned
+				r.Family = family
 				r.Table = 1
 				r.Mask = 0xff
 				r.Mark = 0xbb
@@ -319,6 +329,7 @@ func runRuleListFiltered(t *testing.T, family int, srcNet, dstNet *net.IPNet) {
 				r := NewRule()
 				r.Src = srcNet
 				r.Priority = 1 // Must add priority, table, mask otherwise it's auto-assigned
+				r.Family = family
 				r.Table = 12
 				r.Tos = 12 // Tos must equal table
 				RuleAdd(r)
@@ -417,8 +428,10 @@ func ruleEquals(a, b Rule) bool {
 			(a.Dst != nil && b.Dst != nil && a.Dst.String() == b.Dst.String())) &&
 		a.OifName == b.OifName &&
 		a.Priority == b.Priority &&
+		a.Family == b.Family &&
 		a.IifName == b.IifName &&
 		a.Invert == b.Invert &&
 		a.Tos == b.Tos &&
-		a.IPProto == b.IPProto
+		a.IPProto == b.IPProto &&
+		a.Protocol == b.Protocol
 }
